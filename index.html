@@ -166,9 +166,9 @@
     // ── State ─────────────────────────────────────────────────────────────────
     let streetsGeoJSON    = emptyFC();
     let addressesByStreet = {};      // street name → GeoJSON Feature[]
-    let selectedStreetId  = null;
-    let activePopup       = null;
-    let fetchTimer        = null;
+    let selectedStreetName = null;
+    let activePopup        = null;
+    let fetchTimer         = null;
 
     function emptyFC() { return { type: 'FeatureCollection', features: [] }; }
 
@@ -211,27 +211,22 @@
 
     // ── Parse Overpass response ───────────────────────────────────────────────
     function processData(data) {
-      const streetFeatures = [];
-      addressesByStreet    = {};
+      // Group way segments by name → MultiLineString
+      const byName = new Map(); // name → { names:{}, segments:[[coord,…],…] }
+      addressesByStreet = {};
 
       for (const el of data.elements) {
-        // ── Street ways
+        // ── Street ways — accumulate segments per name
         if (el.type === 'way' && el.tags?.highway && el.tags?.name && el.geometry?.length) {
-          // Collect all name:* tags (multilingual)
-          const names = {};
-          for (const [k, v] of Object.entries(el.tags)) {
-            if (k === 'name' || k.startsWith('name:')) names[k] = v;
+          const name = el.tags.name;
+          if (!byName.has(name)) {
+            const names = {};
+            for (const [k, v] of Object.entries(el.tags)) {
+              if (k === 'name' || k.startsWith('name:')) names[k] = v;
+            }
+            byName.set(name, { names, segments: [] });
           }
-          streetFeatures.push({
-            type:     'Feature',
-            id:        el.id,
-            geometry: { type: 'LineString', coordinates: el.geometry.map(n => [n.lon, n.lat]) },
-            properties: {
-              id:    el.id,
-              name:  el.tags.name,
-              names: JSON.stringify(names),
-            },
-          });
+          byName.get(name).segments.push(el.geometry.map(n => [n.lon, n.lat]));
           continue;
         }
 
@@ -243,7 +238,6 @@
         if (el.type === 'node') {
           coords = [el.lon, el.lat];
         } else if (el.type === 'way' && el.geometry?.length) {
-          // Centroid of polygon
           const lons = el.geometry.map(n => n.lon);
           const lats = el.geometry.map(n => n.lat);
           coords = [
@@ -253,24 +247,34 @@
         } else { continue; }
 
         const street = el.tags['addr:street'] || '';
-        const feat   = {
+        (addressesByStreet[street] ??= []).push({
           type:     'Feature',
           geometry: { type: 'Point', coordinates: coords },
           properties: { housenumber: hn, street },
-        };
-        (addressesByStreet[street] ??= []).push(feat);
+        });
+      }
+
+      // Build merged features (MultiLineString when >1 segment)
+      const streetFeatures = [];
+      for (const [name, { names, segments }] of byName) {
+        streetFeatures.push({
+          type:     'Feature',
+          geometry: segments.length === 1
+            ? { type: 'LineString',      coordinates: segments[0] }
+            : { type: 'MultiLineString', coordinates: segments },
+          properties: { name, names: JSON.stringify(names) },
+        });
       }
 
       streetsGeoJSON = { type: 'FeatureCollection', features: streetFeatures };
       map.getSource('streets-source')?.setData(streetsGeoJSON);
 
-      // Reset any active selection (data changed under us)
-      if (selectedStreetId !== null) resetSelection();
+      if (selectedStreetName !== null) resetSelection();
     }
 
     // ── Selection ─────────────────────────────────────────────────────────────
     function resetSelection() {
-      selectedStreetId = null;
+      selectedStreetName = null;
       map.setFilter('streets-layer', null);
       if (map.getLayer('addr-layer'))   map.removeLayer('addr-layer');
       if (map.getSource('addr-source')) map.removeSource('addr-source');
@@ -279,17 +283,16 @@
     }
 
     function selectStreet(feature) {
-      // Toggle off if same street clicked again
-      if (selectedStreetId === feature.properties.id) { resetSelection(); return; }
+      const name = feature.properties.name;
+      if (selectedStreetName === name) { resetSelection(); return; }
 
-      selectedStreetId = feature.properties.id;
+      selectedStreetName = name;
+      map.setFilter('streets-layer', ['==', ['get', 'name'], selectedStreetName]);
 
-      // Show only this street
-      map.setFilter('streets-layer', ['==', ['get', 'id'], selectedStreetId]);
-
-      // Multilingual name popup at line midpoint
-      const coords   = feature.geometry.coordinates;
-      const midCoord = coords[Math.floor(coords.length / 2)];
+      // Popup at midpoint of first segment
+      const geom = feature.geometry;
+      const firstSeg = geom.type === 'MultiLineString' ? geom.coordinates[0] : geom.coordinates;
+      const midCoord = firstSeg[Math.floor(firstSeg.length / 2)];
       const names    = JSON.parse(feature.properties.names || '{}');
       const rows     = Object.entries(names)
         .map(([k, v]) => `<div class="row"><span class="tag">${k}</span><span>${v}</span></div>`)
@@ -302,7 +305,7 @@
         .addTo(map);
 
       // Address dots for this street
-      const addrs = addressesByStreet[feature.properties.name] ?? [];
+      const addrs = addressesByStreet[name] ?? [];
       if (map.getLayer('addr-layer'))   map.removeLayer('addr-layer');
       if (map.getSource('addr-source')) map.removeSource('addr-source');
 
@@ -322,7 +325,6 @@
         },
       });
 
-      // Cursor on dots
       map.on('mouseenter', 'addr-layer', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'addr-layer', () => { map.getCanvas().style.cursor = ''; });
     }
@@ -364,7 +366,7 @@
         if (streetHits.length) { selectStreet(streetHits[0]); return; }
 
         // Bare map — reset
-        if (selectedStreetId !== null) resetSelection();
+        if (selectedStreetName !== null) resetSelection();
       });
 
       // Update URL + debounced data refresh on pan/zoom
