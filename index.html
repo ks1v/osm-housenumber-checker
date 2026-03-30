@@ -28,6 +28,66 @@
     }
     #status.visible { opacity: 1; }
 
+    /* Settings panel */
+    #settings-panel {
+      position: absolute;
+      bottom: 30px;
+      left: 10px;
+      z-index: 10;
+      font: 13px/1.5 system-ui, sans-serif;
+    }
+    #settings-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,.82);
+      backdrop-filter: blur(6px);
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font: inherit;
+      color: #333;
+      box-shadow: 0 1px 4px rgba(0,0,0,.18);
+      user-select: none;
+    }
+    #settings-toggle:hover { background: rgba(255,255,255,.95); }
+    #settings-toggle .arrow { font-size: 10px; transition: transform .2s; }
+    #settings-panel.open #settings-toggle .arrow { transform: rotate(180deg); }
+    #settings-body {
+      display: none;
+      background: rgba(255,255,255,.82);
+      backdrop-filter: blur(6px);
+      border-radius: 6px;
+      padding: 12px 14px;
+      margin-bottom: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.18);
+      min-width: 220px;
+    }
+    #settings-panel.open #settings-body { display: block; }
+    .sp-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 9px;
+    }
+    .sp-row:last-child { margin-bottom: 0; }
+    .sp-label { color: #444; white-space: nowrap; }
+    .sp-row input[type=color] {
+      width: 36px; height: 24px;
+      border: 1px solid #ccc; border-radius: 4px;
+      padding: 1px; cursor: pointer; background: none;
+    }
+    .sp-row input[type=range] {
+      width: 100px; cursor: pointer; accent-color: #2563eb;
+    }
+    .sp-val { min-width: 28px; text-align: right; color: #666; }
+    .sp-sep {
+      border: none; border-top: 1px solid rgba(0,0,0,.08);
+      margin: 8px 0;
+    }
+
     /* Popup styles */
     .maplibregl-popup-content {
       font: 13px/1.6 system-ui, sans-serif;
@@ -49,6 +109,38 @@
 <body>
   <div id="map"></div>
   <div id="status">Loading…</div>
+
+  <div id="settings-panel">
+    <div id="settings-body">
+      <div class="sp-row">
+        <span class="sp-label">Street color</span>
+        <input type="color" id="sp-street-color">
+      </div>
+      <div class="sp-row">
+        <span class="sp-label">Street width</span>
+        <input type="range" id="sp-street-width" min="0.5" max="8" step="0.5">
+        <span class="sp-val" id="sp-street-width-val"></span>
+      </div>
+      <div class="sp-row">
+        <span class="sp-label">Street opacity</span>
+        <input type="range" id="sp-street-opacity" min="0.1" max="1" step="0.05">
+        <span class="sp-val" id="sp-street-opacity-val"></span>
+      </div>
+      <hr class="sp-sep">
+      <div class="sp-row">
+        <span class="sp-label">Dot color</span>
+        <input type="color" id="sp-dot-color">
+      </div>
+      <div class="sp-row">
+        <span class="sp-label">Dot size</span>
+        <input type="range" id="sp-dot-radius" min="2" max="16" step="1">
+        <span class="sp-val" id="sp-dot-radius-val"></span>
+      </div>
+    </div>
+    <button id="settings-toggle">
+      <span>Style settings</span><span class="arrow">▲</span>
+    </button>
+  </div>
 
   <script src="settings.js"></script>
   <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
@@ -274,7 +366,51 @@
       });
 
       fetchOSMData();
+
+      // ── Settings panel ───────────────────────────────────────────────────
+      initSettingsPanel();
     });
+
+    function initSettingsPanel() {
+      const panel = document.getElementById('settings-panel');
+      document.getElementById('settings-toggle').addEventListener('click', () => {
+        panel.classList.toggle('open');
+      });
+
+      // Helper: bind a color input
+      function bindColor(id, getProp, layerId) {
+        const el = document.getElementById(id);
+        el.value = SETTINGS[getProp];
+        el.addEventListener('input', () => {
+          SETTINGS[getProp] = el.value;
+          if (map.getLayer(layerId)) map.setPaintProperty(layerId, ...colorProp(layerId, el.value));
+        });
+      }
+
+      function colorProp(layerId, val) {
+        return layerId === 'streets-layer' ? ['line-color', val] : ['circle-color', val];
+      }
+
+      // Helper: bind a range input
+      function bindRange(id, valId, getProp, layerId, mapProp, fmt) {
+        const el  = document.getElementById(id);
+        const lbl = document.getElementById(valId);
+        el.value  = SETTINGS[getProp];
+        lbl.textContent = fmt(SETTINGS[getProp]);
+        el.addEventListener('input', () => {
+          const v = parseFloat(el.value);
+          SETTINGS[getProp] = v;
+          lbl.textContent = fmt(v);
+          if (map.getLayer(layerId)) map.setPaintProperty(layerId, mapProp, v);
+        });
+      }
+
+      bindColor('sp-street-color',   'streetColor',   'streets-layer');
+      bindRange('sp-street-width',   'sp-street-width-val',   'streetWidth',   'streets-layer', 'line-width',    v => v);
+      bindRange('sp-street-opacity', 'sp-street-opacity-val', 'streetOpacity', 'streets-layer', 'line-opacity',  v => Math.round(v * 100) + '%');
+      bindColor('sp-dot-color',      'addrDotColor',  'addr-layer');
+      bindRange('sp-dot-radius',     'sp-dot-radius-val',     'addrDotRadius', 'addr-layer',    'circle-radius', v => v);
+    }
   </script>
 </body>
 </html>
