@@ -22,8 +22,4 @@ const SETTINGS = {
   mapCenter: [44.863, 40.741],  // Dilijan, Armenia
   mapZoom:   14,
 
-  // MapTiler API key (optional — free tier at maptiler.com, 100k tiles/month)
-  // When set, uses MapTiler Streets v2 style (fresher snapshots, better style).
-  // Leave empty to use OpenFreeMap (no key needed).
-  mapTilerApiKey: '',
 };
