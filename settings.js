@@ -20,6 +20,6 @@ const SETTINGS = {
   addrDotStrokeWidth:  1.5,
 
   // Map initial view [longitude, latitude] and zoom
-  mapCenter: [24.745, 59.437],  // Tallinn Old Town
+  mapCenter: [44.863, 40.741],  // Dilijan, Armenia
   mapZoom:   14,
 };
