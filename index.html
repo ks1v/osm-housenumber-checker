@@ -209,6 +209,10 @@
         <input type="range" id="sp-street-width" min="0.5" max="8" step="0.5">
         <span class="sp-val" id="sp-street-width-val"></span>
       </div>
+      <div class="sp-row">
+        <span class="sp-label">Name language</span>
+        <select id="sp-lang" style="border:1px solid #ccc;border-radius:4px;padding:2px 4px;font:inherit;cursor:pointer;background:#fff;"></select>
+      </div>
       <hr class="sp-sep">
       <div class="sp-row">
         <span class="sp-label">Dot color</span>
@@ -221,7 +225,7 @@
       </div>
     </div>
     <button id="settings-toggle">
-      <span>Style settings</span><span class="arrow">▲</span>
+      <span>Settings</span><span class="arrow">▲</span>
     </button>
   </div>
 
@@ -355,6 +359,7 @@
 
       if (selectedStreetName !== null) resetSelection();
       buildStreetList();
+      updateLangDropdown();
     }
 
     // ── Selection ─────────────────────────────────────────────────────────────
@@ -382,14 +387,19 @@
       const firstSeg = geom.type === 'MultiLineString' ? geom.coordinates[0] : geom.coordinates;
       const midCoord = firstSeg[Math.floor(firstSeg.length / 2)];
       const names    = JSON.parse(feature.properties.names || '{}');
-      const rows     = Object.entries(names)
+      // Show selected-lang name prominently, then all others below
+      const displayKey = currentLang === 'name' ? 'name' : `name:${currentLang}`;
+      const primary    = names[displayKey] ?? names['name'] ?? name;
+      const rest       = Object.entries(names)
+        .filter(([k]) => k !== displayKey)
         .map(([k, v]) => `<div class="row"><span class="tag">${k}</span><span>${v}</span></div>`)
         .join('');
+      const html = `<div class="popup-names"><div style="font-weight:600;margin-bottom:4px">${primary}</div>${rest}</div>`;
 
       activePopup?.remove();
       activePopup = new maplibregl.Popup({ closeButton: false, maxWidth: '280px', offset: 6 })
         .setLngLat(midCoord)
-        .setHTML(`<div class="popup-names">${rows}</div>`)
+        .setHTML(html)
         .addTo(map);
 
       // Address dots for this street
@@ -547,10 +557,38 @@
       });
     }
 
+    let currentLang = 'name'; // 'name' = default OSM name tag
+
+    function updateLangDropdown() {
+      const langs = new Set();
+      for (const f of streetsGeoJSON.features) {
+        const names = JSON.parse(f.properties.names || '{}');
+        for (const k of Object.keys(names)) {
+          if (k.startsWith('name:')) langs.add(k.slice(5));
+        }
+      }
+      const sel = document.getElementById('sp-lang');
+      const prev = sel.value;
+      sel.innerHTML = '<option value="name">default</option>';
+      for (const lang of [...langs].sort()) {
+        const opt = document.createElement('option');
+        opt.value = lang; opt.textContent = lang;
+        sel.appendChild(opt);
+      }
+      // Restore previous selection if still available
+      if ([...langs].includes(prev)) sel.value = prev;
+      else { sel.value = 'name'; currentLang = 'name'; }
+    }
+
     function initSettingsPanel() {
       const panel = document.getElementById('settings-panel');
+      panel.classList.add('open');
       document.getElementById('settings-toggle').addEventListener('click', () => {
         panel.classList.toggle('open');
+      });
+
+      document.getElementById('sp-lang').addEventListener('change', (e) => {
+        currentLang = e.target.value;
       });
 
       // Helper: bind a color input
