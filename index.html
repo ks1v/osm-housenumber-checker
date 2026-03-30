@@ -28,6 +28,75 @@
     }
     #status.visible { opacity: 1; }
 
+    /* Street list panel */
+    #street-panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      font: 13px/1.5 system-ui, sans-serif;
+      max-width: 320px;
+    }
+    #street-panel-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,.82);
+      backdrop-filter: blur(6px);
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font: inherit;
+      color: #333;
+      box-shadow: 0 1px 4px rgba(0,0,0,.18);
+      user-select: none;
+      width: 100%;
+    }
+    #street-panel-toggle:hover { background: rgba(255,255,255,.95); }
+    #street-panel-toggle .arrow { font-size: 10px; margin-left: auto; transition: transform .2s; }
+    #street-panel.open #street-panel-toggle .arrow { transform: rotate(180deg); }
+    #street-panel-body {
+      display: none;
+      background: rgba(255,255,255,.82);
+      backdrop-filter: blur(6px);
+      border-radius: 6px;
+      margin-top: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.18);
+      max-height: 340px;
+      overflow-y: auto;
+    }
+    #street-panel.open #street-panel-body { display: block; }
+    #street-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    #street-table thead th {
+      position: sticky;
+      top: 0;
+      background: rgba(245,245,245,.95);
+      padding: 6px 8px;
+      text-align: left;
+      color: #666;
+      font-weight: 600;
+      border-bottom: 1px solid rgba(0,0,0,.08);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    #street-table thead th:hover { color: #333; }
+    #street-table thead th.sorted { color: #e63946; }
+    #street-table tbody tr {
+      cursor: pointer;
+      border-bottom: 1px solid rgba(0,0,0,.05);
+    }
+    #street-table tbody tr:hover { background: rgba(230,57,70,.08); }
+    #street-table tbody tr.active { background: rgba(230,57,70,.15); }
+    #street-table td { padding: 5px 8px; }
+    #street-table .td-num { text-align: right; color: #666; width: 44px; }
+    #street-table .td-name { color: #222; }
+
     /* Settings panel */
     #settings-panel {
       position: absolute;
@@ -109,6 +178,25 @@
 <body>
   <div id="map"></div>
   <div id="status">Loading…</div>
+
+  <div id="street-panel">
+    <button id="street-panel-toggle">
+      <span id="street-panel-title">Streets</span>
+      <span class="arrow">▼</span>
+    </button>
+    <div id="street-panel-body">
+      <table id="street-table">
+        <thead>
+          <tr>
+            <th data-col="length" title="Total length (km)">km</th>
+            <th data-col="count"  title="Number of buildings">#</th>
+            <th data-col="name">Name</th>
+          </tr>
+        </thead>
+        <tbody id="street-tbody"></tbody>
+      </table>
+    </div>
+  </div>
 
   <div id="settings-panel">
     <div id="settings-body">
@@ -266,6 +354,7 @@
       map.getSource('streets-source')?.setData(streetsGeoJSON);
 
       if (selectedStreetName !== null) resetSelection();
+      buildStreetList();
     }
 
     // ── Selection ─────────────────────────────────────────────────────────────
@@ -276,6 +365,8 @@
       if (map.getSource('addr-source')) map.removeSource('addr-source');
       activePopup?.remove();
       activePopup = null;
+      document.getElementById('street-panel').style.display = '';
+      buildStreetList();
     }
 
     function selectStreet(feature) {
@@ -283,6 +374,7 @@
       if (selectedStreetName === name) { resetSelection(); return; }
 
       selectedStreetName = name;
+      document.getElementById('street-panel').style.display = 'none';
       map.setFilter('streets-layer', ['==', ['get', 'name'], selectedStreetName]);
 
       // Popup at midpoint of first segment
@@ -378,7 +470,82 @@
 
       // ── Settings panel ───────────────────────────────────────────────────
       initSettingsPanel();
+
+      // ── Street list panel ────────────────────────────────────────────────
+      initStreetPanel();
     });
+
+    // ── Street list panel ─────────────────────────────────────────────────────
+    let streetSortCol = 'name';
+    let streetSortAsc = true;
+
+    function haversineKm(a, b) {
+      const R = 6371, toRad = x => x * Math.PI / 180;
+      const dLat = toRad(b[1] - a[1]), dLon = toRad(b[0] - a[0]);
+      const h = Math.sin(dLat/2)**2 + Math.cos(toRad(a[1])) * Math.cos(toRad(b[1])) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+
+    function featureLengthKm(f) {
+      const segs = f.geometry.type === 'MultiLineString' ? f.geometry.coordinates : [f.geometry.coordinates];
+      return segs.reduce((sum, seg) => {
+        for (let i = 1; i < seg.length; i++) sum += haversineKm(seg[i-1], seg[i]);
+        return sum;
+      }, 0);
+    }
+
+    function buildStreetList() {
+      const rows = streetsGeoJSON.features.map(f => ({
+        feature: f,
+        name:    f.properties.name,
+        length:  featureLengthKm(f),
+        count:   (addressesByStreet[f.properties.name] ?? []).length,
+      }));
+
+      rows.sort((a, b) => {
+        const av = a[streetSortCol], bv = b[streetSortCol];
+        const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
+        return streetSortAsc ? cmp : -cmp;
+      });
+
+      const tbody = document.getElementById('street-tbody');
+      tbody.innerHTML = '';
+      for (const r of rows) {
+        const tr = document.createElement('tr');
+        if (r.name === selectedStreetName) tr.classList.add('active');
+        tr.innerHTML = `<td class="td-num">${r.length.toFixed(2)}</td>
+                        <td class="td-num">${r.count}</td>
+                        <td class="td-name">${r.name}</td>`;
+        tr.addEventListener('click', () => selectStreet(r.feature));
+        tbody.appendChild(tr);
+      }
+
+      document.getElementById('street-panel-title').textContent =
+        `Streets (${rows.length})`;
+
+      // Update sort indicators
+      document.querySelectorAll('#street-table thead th').forEach(th => {
+        th.classList.toggle('sorted', th.dataset.col === streetSortCol);
+        th.textContent = th.dataset.col === 'length' ? 'km' : th.dataset.col === 'count' ? '#' : 'Name';
+        if (th.dataset.col === streetSortCol) th.textContent += streetSortAsc ? ' ▲' : ' ▼';
+      });
+    }
+
+    function initStreetPanel() {
+      const panel = document.getElementById('street-panel');
+      panel.classList.add('open');
+      document.getElementById('street-panel-toggle').addEventListener('click', () => {
+        panel.classList.toggle('open');
+      });
+
+      document.querySelectorAll('#street-table thead th').forEach(th => {
+        th.addEventListener('click', () => {
+          if (streetSortCol === th.dataset.col) streetSortAsc = !streetSortAsc;
+          else { streetSortCol = th.dataset.col; streetSortAsc = th.dataset.col === 'name'; }
+          buildStreetList();
+        });
+      });
+    }
 
     function initSettingsPanel() {
       const panel = document.getElementById('settings-panel');
