@@ -141,6 +141,16 @@
   <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
   <script>
     // ── Map ───────────────────────────────────────────────────────────────────
+    // ── URL params: ?lat=&lng=&z= ─────────────────────────────────────────────
+    (function applyURLParams() {
+      const p = new URLSearchParams(location.search);
+      const lat = parseFloat(p.get('lat'));
+      const lng = parseFloat(p.get('lng'));
+      const z   = parseFloat(p.get('z'));
+      if (!isNaN(lat) && !isNaN(lng)) SETTINGS.mapCenter = [lng, lat];
+      if (!isNaN(z))                  SETTINGS.mapZoom   = z;
+    })();
+
     const tileStyle = SETTINGS.mapTilerApiKey
       ? `https://api.maptiler.com/maps/streets-v2/style.json?key=${SETTINGS.mapTilerApiKey}`
       : 'https://tiles.openfreemap.org/styles/liberty';
@@ -357,8 +367,11 @@
         if (selectedStreetId !== null) resetSelection();
       });
 
-      // Debounced refresh on pan/zoom
+      // Update URL + debounced data refresh on pan/zoom
       map.on('moveend', () => {
+        const c = map.getCenter();
+        const z = map.getZoom().toFixed(1);
+        history.replaceState(null, '', `?lat=${c.lat.toFixed(5)}&lng=${c.lng.toFixed(5)}&z=${z}`);
         clearTimeout(fetchTimer);
         fetchTimer = setTimeout(fetchOSMData, 700);
       });
