@@ -141,9 +141,13 @@
   <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
   <script>
     // ── Map ───────────────────────────────────────────────────────────────────
+    const tileStyle = SETTINGS.mapTilerApiKey
+      ? `https://api.maptiler.com/maps/streets-v2/style.json?key=${SETTINGS.mapTilerApiKey}`
+      : 'https://tiles.openfreemap.org/styles/liberty';
+
     const map = new maplibregl.Map({
       container: 'map',
-      style:     'https://tiles.openfreemap.org/styles/liberty',
+      style:     tileStyle,
       center:    SETTINGS.mapCenter,
       zoom:      SETTINGS.mapZoom,
     });
