@@ -366,8 +366,9 @@
     function resetSelection() {
       selectedStreetName = null;
       map.setFilter('streets-layer', null);
-      if (map.getLayer('addr-layer'))   map.removeLayer('addr-layer');
-      if (map.getSource('addr-source')) map.removeSource('addr-source');
+      if (map.getLayer('addr-label-layer')) map.removeLayer('addr-label-layer');
+      if (map.getLayer('addr-layer'))       map.removeLayer('addr-layer');
+      if (map.getSource('addr-source'))     map.removeSource('addr-source');
       activePopup?.remove();
       activePopup = null;
       document.getElementById('street-panel').style.display = '';
@@ -382,10 +383,18 @@
       document.getElementById('street-panel').style.display = 'none';
       map.setFilter('streets-layer', ['==', ['get', 'name'], selectedStreetName]);
 
-      // Popup at midpoint of first segment
+      // Popup offset perpendicularly from midpoint of first segment
       const geom = feature.geometry;
       const firstSeg = geom.type === 'MultiLineString' ? geom.coordinates[0] : geom.coordinates;
-      const midCoord = firstSeg[Math.floor(firstSeg.length / 2)];
+      const midIdx   = Math.floor(firstSeg.length / 2);
+      const midCoord = firstSeg[midIdx];
+      // Compute perpendicular direction at midpoint
+      const p1 = firstSeg[Math.max(0, midIdx - 1)];
+      const p2 = firstSeg[Math.min(firstSeg.length - 1, midIdx + 1)];
+      const dx = p2[0] - p1[0], dy = p2[1] - p1[1];
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const OFFSET = 0.0004; // ~40m geographic offset
+      const popupCoord = [midCoord[0] - (dy / len) * OFFSET, midCoord[1] + (dx / len) * OFFSET];
       const names    = JSON.parse(feature.properties.names || '{}');
       // Show selected-lang name prominently, then all others below
       const displayKey = currentLang === 'name' ? 'name' : `name:${currentLang}`;
@@ -397,15 +406,16 @@
       const html = `<div class="popup-names"><div style="font-weight:600;margin-bottom:4px">${primary}</div>${rest}</div>`;
 
       activePopup?.remove();
-      activePopup = new maplibregl.Popup({ closeButton: false, maxWidth: '280px', offset: 6 })
-        .setLngLat(midCoord)
+      activePopup = new maplibregl.Popup({ closeButton: false, maxWidth: '280px', offset: 4 })
+        .setLngLat(popupCoord)
         .setHTML(html)
         .addTo(map);
 
-      // Address dots for this street
+      // Address dots + housenumber labels
       const addrs = addressesByStreet[name] ?? [];
-      if (map.getLayer('addr-layer'))   map.removeLayer('addr-layer');
-      if (map.getSource('addr-source')) map.removeSource('addr-source');
+      if (map.getLayer('addr-label-layer')) map.removeLayer('addr-label-layer');
+      if (map.getLayer('addr-layer'))       map.removeLayer('addr-layer');
+      if (map.getSource('addr-source'))     map.removeSource('addr-source');
 
       map.addSource('addr-source', {
         type: 'geojson',
@@ -422,9 +432,34 @@
           'circle-stroke-color': SETTINGS.addrDotStrokeColor,
         },
       });
+      map.addLayer({
+        id:     'addr-label-layer',
+        type:   'symbol',
+        source: 'addr-source',
+        layout: {
+          'text-field':    ['get', 'housenumber'],
+          'text-size':     12,
+          'text-offset':   [0, -1.4],
+          'text-anchor':   'bottom',
+          'text-allow-overlap': false,
+        },
+        paint: {
+          'text-color':      '#222',
+          'text-halo-color': '#fff',
+          'text-halo-width': 1.5,
+        },
+      });
 
-      map.on('mouseenter', 'addr-layer', () => { map.getCanvas().style.cursor = 'pointer'; });
-      map.on('mouseleave', 'addr-layer', () => { map.getCanvas().style.cursor = ''; });
+      // Zoom map to fit the full street geometry
+      const allCoords = geom.type === 'MultiLineString'
+        ? geom.coordinates.flat()
+        : geom.coordinates;
+      const lngs = allCoords.map(c => c[0]);
+      const lats = allCoords.map(c => c[1]);
+      map.fitBounds(
+        [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+        { padding: 120, maxZoom: 17, duration: 600 }
+      );
     }
 
     // ── Map load ──────────────────────────────────────────────────────────────
@@ -447,19 +482,6 @@
 
       // Single click handler — dispatches by hit-test
       map.on('click', (e) => {
-        // Address dot takes priority
-        const addrHits = map.getLayer('addr-layer')
-          ? map.queryRenderedFeatures(e.point, { layers: ['addr-layer'] })
-          : [];
-        if (addrHits.length) {
-          const { housenumber, street } = addrHits[0].properties;
-          new maplibregl.Popup({ closeButton: true, offset: 10, maxWidth: '200px' })
-            .setLngLat(addrHits[0].geometry.coordinates.slice())
-            .setHTML(`<div class="popup-addr"><b>${housenumber}</b>${street ? `<br><span>${street}</span>` : ''}</div>`)
-            .addTo(map);
-          return;
-        }
-
         const streetHits = map.queryRenderedFeatures(e.point, { layers: ['streets-layer'] });
         if (streetHits.length) { selectStreet(streetHits[0]); return; }
 
