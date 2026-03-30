@@ -201,27 +201,24 @@
   <div id="settings-panel">
     <div id="settings-body">
       <div class="sp-row">
-        <span class="sp-label">Street color</span>
-        <input type="color" id="sp-street-color">
+        <span class="sp-label">Color</span>
+        <input type="color" id="sp-color">
       </div>
       <div class="sp-row">
         <span class="sp-label">Street width</span>
         <input type="range" id="sp-street-width" min="0.5" max="8" step="0.5">
         <span class="sp-val" id="sp-street-width-val"></span>
       </div>
-      <div class="sp-row">
-        <span class="sp-label">Name language</span>
-        <select id="sp-lang" style="border:1px solid #ccc;border-radius:4px;padding:2px 4px;font:inherit;cursor:pointer;background:#fff;"></select>
-      </div>
       <hr class="sp-sep">
-      <div class="sp-row">
-        <span class="sp-label">Dot color</span>
-        <input type="color" id="sp-dot-color">
-      </div>
       <div class="sp-row">
         <span class="sp-label">Dot size</span>
         <input type="range" id="sp-dot-radius" min="2" max="16" step="1">
         <span class="sp-val" id="sp-dot-radius-val"></span>
+      </div>
+      <hr class="sp-sep">
+      <div class="sp-row">
+        <span class="sp-label">Name language</span>
+        <select id="sp-lang" style="border:1px solid #ccc;border-radius:4px;padding:2px 4px;font:inherit;cursor:pointer;background:#fff;"></select>
       </div>
     </div>
     <button id="settings-toggle">
@@ -427,7 +424,7 @@
         source: 'addr-source',
         paint:  {
           'circle-radius':       SETTINGS.addrDotRadius,
-          'circle-color':        SETTINGS.addrDotColor,
+          'circle-color':        SETTINGS.color,
           'circle-stroke-width': SETTINGS.addrDotStrokeWidth,
           'circle-stroke-color': SETTINGS.addrDotStrokeColor,
         },
@@ -471,7 +468,7 @@
         source: 'streets-source',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint:  {
-          'line-color':  SETTINGS.streetColor,
+          'line-color':  SETTINGS.color,
           'line-width':  SETTINGS.streetWidth,
         },
       });
@@ -508,8 +505,8 @@
     });
 
     // ── Street list panel ─────────────────────────────────────────────────────
-    let streetSortCol = 'name';
-    let streetSortAsc = true;
+    let streetSortCol = 'length';
+    let streetSortAsc = false;
 
     function haversineKm(a, b) {
       const R = 6371, toRad = x => x * Math.PI / 180;
@@ -526,12 +523,19 @@
       }, 0);
     }
 
+    function displayName(f) {
+      const names = JSON.parse(f.properties.names || '{}');
+      const key = currentLang === 'name' ? 'name' : `name:${currentLang}`;
+      return names[key] ?? names['name'] ?? f.properties.name;
+    }
+
     function buildStreetList() {
       const rows = streetsGeoJSON.features.map(f => ({
-        feature: f,
-        name:    f.properties.name,
-        length:  featureLengthKm(f),
-        count:   (addressesByStreet[f.properties.name] ?? []).length,
+        feature:     f,
+        name:        f.properties.name,
+        displayName: displayName(f),
+        length:      featureLengthKm(f),
+        count:       (addressesByStreet[f.properties.name] ?? []).length,
       }));
 
       rows.sort((a, b) => {
@@ -547,7 +551,7 @@
         if (r.name === selectedStreetName) tr.classList.add('active');
         tr.innerHTML = `<td class="td-num">${r.length.toFixed(2)}</td>
                         <td class="td-num">${r.count}</td>
-                        <td class="td-name">${r.name}</td>`;
+                        <td class="td-name">${r.displayName}</td>`;
         tr.addEventListener('click', () => selectStreet(r.feature));
         tbody.appendChild(tr);
       }
@@ -641,9 +645,16 @@
         });
       }
 
-      bindColor('sp-street-color', 'streetColor', 'streets-layer');
+      // Single color binding updates both street lines and building dots
+      const colorEl = document.getElementById('sp-color');
+      colorEl.value = SETTINGS.color;
+      colorEl.addEventListener('input', () => {
+        SETTINGS.color = colorEl.value;
+        if (map.getLayer('streets-layer')) map.setPaintProperty('streets-layer', 'line-color', SETTINGS.color);
+        if (map.getLayer('addr-layer'))    map.setPaintProperty('addr-layer', 'circle-color', SETTINGS.color);
+      });
+
       bindRange('sp-street-width', 'sp-street-width-val', 'streetWidth', 'streets-layer', 'line-width', v => v);
-      bindColor('sp-dot-color',    'addrDotColor', 'addr-layer');
       bindRange('sp-dot-radius',   'sp-dot-radius-val', 'addrDotRadius', 'addr-layer', 'circle-radius', v => v);
     }
   </script>

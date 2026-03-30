@@ -8,12 +8,13 @@ const SETTINGS = {
   //   https://overpass-api.de/api/interpreter         (main, sometimes busy)
   overpassEndpoint: 'https://overpass.kumi.systems/api/interpreter',
 
-  // Street line style (all streets, default state)
-  streetColor: '#e63946',
+  // Color used for both street lines and building dots
+  color: '#e63946',
+
+  // Street line width
   streetWidth: 4,
 
   // Address dot style (shown when a street is selected)
-  addrDotColor:       '#e63946',
   addrDotRadius:      7,
   addrDotStrokeColor: '#ffffff',
   addrDotStrokeWidth: 1.5,
