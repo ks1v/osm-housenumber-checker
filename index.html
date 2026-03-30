@@ -80,7 +80,7 @@
       padding: 1px; cursor: pointer; background: none;
     }
     .sp-row input[type=range] {
-      width: 100px; cursor: pointer; accent-color: #2563eb;
+      width: 100px; cursor: pointer; accent-color: #e63946;
     }
     .sp-val { min-width: 28px; text-align: right; color: #666; }
     .sp-sep {
@@ -120,11 +120,6 @@
         <span class="sp-label">Street width</span>
         <input type="range" id="sp-street-width" min="0.5" max="8" step="0.5">
         <span class="sp-val" id="sp-street-width-val"></span>
-      </div>
-      <div class="sp-row">
-        <span class="sp-label">Street opacity</span>
-        <input type="range" id="sp-street-opacity" min="0.1" max="1" step="0.05">
-        <span class="sp-val" id="sp-street-opacity-val"></span>
       </div>
       <hr class="sp-sep">
       <div class="sp-row">
@@ -327,9 +322,8 @@
         source: 'streets-source',
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint:  {
-          'line-color':   SETTINGS.streetColor,
-          'line-width':   SETTINGS.streetWidth,
-          'line-opacity': SETTINGS.streetOpacity,
+          'line-color':  SETTINGS.streetColor,
+          'line-width':  SETTINGS.streetWidth,
         },
       });
 
@@ -405,11 +399,10 @@
         });
       }
 
-      bindColor('sp-street-color',   'streetColor',   'streets-layer');
-      bindRange('sp-street-width',   'sp-street-width-val',   'streetWidth',   'streets-layer', 'line-width',    v => v);
-      bindRange('sp-street-opacity', 'sp-street-opacity-val', 'streetOpacity', 'streets-layer', 'line-opacity',  v => Math.round(v * 100) + '%');
-      bindColor('sp-dot-color',      'addrDotColor',  'addr-layer');
-      bindRange('sp-dot-radius',     'sp-dot-radius-val',     'addrDotRadius', 'addr-layer',    'circle-radius', v => v);
+      bindColor('sp-street-color', 'streetColor', 'streets-layer');
+      bindRange('sp-street-width', 'sp-street-width-val', 'streetWidth', 'streets-layer', 'line-width', v => v);
+      bindColor('sp-dot-color',    'addrDotColor', 'addr-layer');
+      bindRange('sp-dot-radius',   'sp-dot-radius-val', 'addrDotRadius', 'addr-layer', 'circle-radius', v => v);
     }
   </script>
 </body>
