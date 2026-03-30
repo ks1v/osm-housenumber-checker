@@ -249,8 +249,12 @@
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
     // ── State ─────────────────────────────────────────────────────────────────
-    let streetsGeoJSON    = emptyFC();
-    let addressesByStreet = {};      // street name → GeoJSON Feature[]
+    let streetsGeoJSON     = emptyFC();
+    // Persistent caches — survive across Overpass fetches
+    const streetsByName    = new Map();  // name → { names:{}, segments:coord[][] }
+    const addressesByStreet = {};        // street name → GeoJSON Feature[]
+    const processedIds     = new Set();  // OSM element IDs already merged
+    let   cachedBbox       = null;       // expanded bbox of last fetch
     let selectedStreetName = null;
     let activePopup        = null;
     let fetchTimer         = null;
@@ -262,10 +266,29 @@
     function showStatus(msg) { statusEl.textContent = msg; statusEl.classList.add('visible'); }
     function hideStatus()    { statusEl.classList.remove('visible'); }
 
-    // ── Overpass fetch ────────────────────────────────────────────────────────
+    // ── Bbox helpers ──────────────────────────────────────────────────────────
+    function expandedBbox(bounds) {
+      const latPad = (bounds.getNorth() - bounds.getSouth()) * 0.5;
+      const lonPad = (bounds.getEast()  - bounds.getWest())  * 0.5;
+      return {
+        s: bounds.getSouth() - latPad, n: bounds.getNorth() + latPad,
+        w: bounds.getWest()  - lonPad, e: bounds.getEast()  + lonPad,
+      };
+    }
+
+    function viewportInsideCache(bounds) {
+      if (!cachedBbox) return false;
+      return bounds.getSouth() >= cachedBbox.s && bounds.getNorth() <= cachedBbox.n &&
+             bounds.getWest()  >= cachedBbox.w && bounds.getEast()  <= cachedBbox.e;
+    }
+
+    // ── Overpass fetch — only when viewport leaves cache ──────────────────────
     async function fetchOSMData() {
-      const b    = map.getBounds();
-      const bbox = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
+      const bounds = map.getBounds();
+      if (viewportInsideCache(bounds)) return;   // all data already loaded
+
+      cachedBbox = expandedBbox(bounds);
+      const bbox = `${cachedBbox.s},${cachedBbox.w},${cachedBbox.n},${cachedBbox.e}`;
       const query = [
         '[out:json][timeout:25];',
         '(',
@@ -278,40 +301,41 @@
 
       showStatus('Loading…');
       try {
-        const res  = await fetch(SETTINGS.overpassEndpoint, {
+        const res = await fetch(SETTINGS.overpassEndpoint, {
           method:  'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body:    'data=' + encodeURIComponent(query),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        processData(data);
+        mergeData(await res.json());
         hideStatus();
       } catch (err) {
+        cachedBbox = null;  // allow retry on next move
         console.error('Overpass error:', err);
         showStatus('Failed to load OSM data — see console');
         setTimeout(hideStatus, 4000);
       }
     }
 
-    // ── Parse Overpass response ───────────────────────────────────────────────
-    function processData(data) {
-      // Group way segments by name → MultiLineString
-      const byName = new Map(); // name → { names:{}, segments:[[coord,…],…] }
-      addressesByStreet = {};
+    // ── Merge Overpass response into persistent caches ────────────────────────
+    function mergeData(data) {
+      let anyNew = false;
 
       for (const el of data.elements) {
-        // ── Street ways — accumulate segments per name
+        if (processedIds.has(el.id)) continue;
+        processedIds.add(el.id);
+        anyNew = true;
+
+        // ── Street ways
         if (el.type === 'way' && el.tags?.highway && el.tags?.name && el.geometry?.length) {
           const name = el.tags.name;
-          if (!byName.has(name)) {
+          if (!streetsByName.has(name)) {
             const names = {};
-            for (const [k, v] of Object.entries(el.tags)) {
+            for (const [k, v] of Object.entries(el.tags))
               if (k === 'name' || k.startsWith('name:')) names[k] = v;
-            }
-            byName.set(name, { names, segments: [] });
+            streetsByName.set(name, { names, segments: [] });
           }
-          byName.get(name).segments.push(el.geometry.map(n => [n.lon, n.lat]));
+          streetsByName.get(name).segments.push(el.geometry.map(n => [n.lon, n.lat]));
           continue;
         }
 
@@ -325,36 +349,33 @@
         } else if (el.type === 'way' && el.geometry?.length) {
           const lons = el.geometry.map(n => n.lon);
           const lats = el.geometry.map(n => n.lat);
-          coords = [
-            lons.reduce((a, b) => a + b) / lons.length,
-            lats.reduce((a, b) => a + b) / lats.length,
-          ];
+          coords = [lons.reduce((a,b)=>a+b)/lons.length, lats.reduce((a,b)=>a+b)/lats.length];
         } else { continue; }
 
         const street = el.tags['addr:street'] || '';
         (addressesByStreet[street] ??= []).push({
-          type:     'Feature',
+          type: 'Feature',
           geometry: { type: 'Point', coordinates: coords },
           properties: { housenumber: hn, street },
         });
       }
 
-      // Build merged features (MultiLineString when >1 segment)
-      const streetFeatures = [];
-      for (const [name, { names, segments }] of byName) {
-        streetFeatures.push({
-          type:     'Feature',
+      if (!anyNew) return;
+
+      // Rebuild GeoJSON from merged caches
+      streetsGeoJSON = {
+        type: 'FeatureCollection',
+        features: [...streetsByName.entries()].map(([name, { names, segments }]) => ({
+          type: 'Feature',
           geometry: segments.length === 1
             ? { type: 'LineString',      coordinates: segments[0] }
             : { type: 'MultiLineString', coordinates: segments },
           properties: { name, names: JSON.stringify(names) },
-        });
-      }
-
-      streetsGeoJSON = { type: 'FeatureCollection', features: streetFeatures };
+        })),
+      };
       map.getSource('streets-source')?.setData(streetsGeoJSON);
 
-      if (selectedStreetName !== null) resetSelection();
+      // Refresh UI — never drop an active selection
       buildStreetList();
       updateLangDropdown();
     }
